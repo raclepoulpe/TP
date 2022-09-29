@@ -1,0 +1,71 @@
+image:
+  file: .gitpod.Dockerfile
+
+tasks:
+- name: Create openrc file
+  command: |
+        echo "$OS_OPENRC_B64" | base64 -d > ./openrc
+        gp sync-done openrc
+        echo "File /home/gitpod/openrc created"
+
+- name: Create SSH keys
+  command: |
+        echo "$SSH_PV_B64" | base64 -d > $HOME/.ssh/id_rsa
+        chmod 600 $HOME/.ssh/id_rsa
+        echo "$SSH_PUB_B64" | base64 -d > $HOME/.ssh/id_rsa.pub
+        chmod 644 $HOME/.ssh/id_rsa.pub
+        gp sync-done ssh
+
+- name: SSH config for Ansible tunneling
+  command: |
+        mkdir $HOME/.ssh/bastion
+        echo "Include bastion/*" > $HOME/.ssh/config
+        echo "Host *" >> $HOME/.ssh/config
+        echo "Port 22" >> $HOME/.ssh/config
+        echo "StrictHostKeyChecking no" >> $HOME/.ssh/config
+        echo "UserKnownHostsFile /dev/null" >> $HOME/.ssh/config
+        echo "ServerAliveInterval 60" >> $HOME/.ssh/config
+        echo "ServerAliveCountMax 30" >> $HOME/.ssh/config
+
+- name: Add OVHcloud API keys variables to properties
+  command: |
+        echo "export OVH_API_AK=\"$(echo $OVH_API_AK_b64|base64 -d)\"" >> ovhrc
+        echo "export OVH_API_AS=\"$(echo $OVH_API_AS_b64|base64 -d)\"" >> ovhrc
+        echo "export OVH_API_CK=\"$(echo $OVH_API_CK_b64|base64 -d)\"" >> ovhrc
+        echo "export APIURL=\"https://api.ovh.com/1.0\"" >> ovhrc
+        gp sync-done ovhrc
+        echo "OVHcloud API keys variables added to ovhrc file"
+
+- name: Set Terraform variables
+  command: |
+        echo "export OVH_ENDPOINT=""ovh-eu""" >> terraformrc
+        echo "export OVH_APPLICATION_KEY=""$(echo $OVH_API_AK_b64|base64 -d)""" >> terraformrc
+        echo "export OVH_APPLICATION_SECRET=""$(echo $OVH_API_AS_b64|base64 -d)""" >> terraformrc
+        echo "export OVH_CONSUMER_KEY=""$(echo $OVH_API_CK_b64|base64 -d)""" >> terraformrc
+        echo "export TF_VAR_IP=""$(curl ifconfig.me)/32""" >> terraformrc
+        echo "export TF_VAR_serviceName=""$(cat openrc | grep OS_TENANT_ID | cut -d = -f2)""" >> terraformrc
+        echo "export TF_VAR_keypairAdmin=\"$(echo $SSH_PUB_B64 | base64 -d)\"" >> terraformrc
+        gp sync-await openrc
+        gp sync-done terraformrc
+        echo "Terraform Variables setted"
+
+- name: Load env files
+  command: |
+        gp sync-await openrc
+        gp sync-await ovhrc
+        gp sync-await terraformrc
+        gp sync-done env
+        echo ". ${GITPOD_REPO_ROOT}/openrc" >> ${HOME}/.bashrc
+        echo ". ${GITPOD_REPO_ROOT}/ovhrc" >> ${HOME}/.bashrc
+        echo ". ${GITPOD_REPO_ROOT}/terraformrc" >> ${HOME}/.bashrc
+
+- name: Final task
+  command: |
+        gp sync-await env
+        gp sync-await ssh
+        . ${HOME}/.bashrc
+        eval $(ssh-agent)
+        ssh-add
+        clear
+
+
